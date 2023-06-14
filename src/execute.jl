@@ -12,7 +12,7 @@ julia> execute("GET key")
 "value"
 ```
 """
-function execute(command::AbstractArray, client::Client=get_global_client())
+function execute(command::AbstractArray, client::Client)
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot execute commands while a subscription is open in the same Client instance"))
     end
@@ -22,15 +22,17 @@ function execute(command::AbstractArray, client::Client=get_global_client())
         retry!(client)
         write(client.socket, resp(command))
         msg = recv(client.socket)
+        print(msg)
         
         if msg isa Exception
             throw(msg)
         end
-    
+        @info msg
+
         return msg
     end
 end
-function execute(command::AbstractString, client::Client=get_global_client())
+function execute(command::AbstractString, client::Client)
     execute(split_on_whitespace(command), client)
 end
 
@@ -39,7 +41,7 @@ end
 
 Sends a RESP compliant command to the Redis host without reading the returned result.
 """
-function execute_without_recv(command::AbstractArray, client::Client=get_global_client())
+function execute_without_recv(command::AbstractArray, client)
     @lock client.lock begin
         flush!(client)
         retry!(client)
@@ -47,7 +49,7 @@ function execute_without_recv(command::AbstractArray, client::Client=get_global_
         return
     end
 end
-function execute_without_recv(command::AbstractString, client::Client=get_global_client())
+function execute_without_recv(command::AbstractString, client::Client)
     execute_without_recv(split_on_whitespace(command), client)
 end
 
@@ -110,59 +112,95 @@ julia> execute(pipe)
 ```
 """
 function execute(pipe::Pipeline)
-    if pipe.client.is_subscribed
-        throw(RedisError("SUBERROR", "Cannot execute Pipeline while a subscription is open in the same Client instance"))
-    end
 
-    @lock pipe.client.lock begin
-        try
-            flush!(pipe.client)
-            retry!(pipe.client)
-            write(pipe.client.socket, join(pipe.resp))
-            messages = [recv(pipe.client.socket) for _ in 1:length(pipe.resp)]
-            
-            if pipe.filter_multi_exec
-                return messages[pipe.multi_exec_bitmask]
+    messages = []
+    order = []
+    try
+        for client in unique(pipe.client_exec)
+            node = pipe.client.clients[client]["client"]
+            resp = pipe.resp[pipe.client_exec .== client]
+
+            if node.is_subscribed
+                throw(RedisError("SUBERROR", "Cannot execute Pipeline while a subscription is open in the same Client instance"))
             end
-            
-            return messages
-        finally
-            flush!(pipe)
+
+            @lock node.lock begin
+                    flush!(node)
+                    retry!(node)
+                    write(node.socket, join(resp))
+                    append!(messages, recv(node.socket) for _ in 1:length(resp))
+                    append!(order, pipe.order[pipe.client_exec .== client])
+            end
         end
+
+        # sort responses to match execution order
+    responses = hcat(order, messages)
+    responses = responses[sortperm(responses[:, 1]), :]
+    messages = responses[:,2]
+    if pipe.filter_multi_exec
+        return messages[pipe.multi_exec_bitmask]
+    end
+    return messages
+   
+    finally
+        flush!(pipe)
     end
 end            
 function execute(pipe::Pipeline, batch_size::Int)
-    if pipe.client.is_subscribed
-        throw(RedisError("SUBERROR", "Cannot execute Pipeline while a subscription is open in the same Client instance"))
-    end
+    
+    messages = []
+    order = []
+    try
+        for client in unique(pipe.client_exec)
 
-    @lock pipe.client.lock begin
-        try
-            flush!(pipe.client)
-            retry!(pipe.client)
+            node = pipe.client.clients[client]["client"]
+            resp = pipe.resp[pipe.client_exec .== client]
+            node_order = pipe.order[pipe.client_exec .== client]
 
-            n_cmd = length(pipe.resp)
-            messages = Vector{Any}(undef, n_cmd)
-            l, r  = 1, batch_size
+            if node.is_subscribed
+                throw(RedisError("SUBERROR", "Cannot execute Pipeline while a subscription is open in the same Client instance"))
+            end
+
+            @lock node.lock begin
             
-            while l <= n_cmd
-                write(pipe.client.socket, join(pipe.resp[l:min(r, n_cmd)]))
+                flush!(node)
+                retry!(node)
+
+                n_cmd = length(resp)
+                l, r  = 1, batch_size
                 
-                for i in l:min(r, n_cmd)
-                    messages[i] = recv(pipe.client.socket)
+                while l <= n_cmd
+                    write(node.socket, join(resp[l:min(r, n_cmd)]))
+                    
+                    for i in l:min(r, n_cmd)
+                        push!(messages, recv(node.socket))
+                    end
+
+                    if r > length(node_order)
+                        append!(order, node_order[l:end])
+                    else
+                        append!(order, node_order[l:r])
+                    end
+                    
+                    l += batch_size
+                    r += batch_size
                 end
                 
-                l += batch_size
-                r += batch_size
             end
             
-            if pipe.filter_multi_exec
-                return messages[pipe.multi_exec_bitmask]
-            end
-            
-            return messages
-        finally
-            flush!(pipe)
         end
+    responses = hcat(order, messages)
+    responses = responses[sortperm(responses[:, 1]), :]
+    messages = responses[:,2]
+
+    if pipe.filter_multi_exec
+        return messages[pipe.multi_exec_bitmask]
     end
-end           
+    
+    return messages
+
+    finally
+        flush!(pipe)
+    end
+    
+end      

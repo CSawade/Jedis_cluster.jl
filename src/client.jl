@@ -68,6 +68,7 @@ mutable struct Client
 end
 
 function Client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
+
     client = Client(
         host,
         port,
@@ -86,8 +87,8 @@ function Client(; host="127.0.0.1", port=6379, database=0, password="", username
         keepalive_enable,
         keepalive_delay
     )
-
-    prepare!(client)
+    prepare!(client)   
+    
     return client
 end
 
@@ -102,6 +103,7 @@ Raw execution is used to bypass locks and retries
 """
 function prepare!(client::Client)
     write(client.socket, resp(["PING"]))
+    
     recv(client.socket)
     
     !isempty(client.password * client.username) && auth(client.password, client.username; client=client)
@@ -155,12 +157,49 @@ function ssl_connect(host::AbstractString, port::Integer, ssl_config::MbedTLS.SS
     return io
 end
 
+
+mutable struct Global_client
+    clients::Dict{String, Any}
+    cluster::Bool
+    slots::Dict{Int, Vector{String}}
+end
+
 """
-    GLOBAL_CLIENT = Ref{Client}()
+    GLOBAL_CLIENT = Ref{GLOBAL_CLIENT}()
 
 Reference to a global Client object.
 """
-const GLOBAL_CLIENT = Ref{Client}()
+const GLOBAL_CLIENT = Ref{Global_client}()
+
+function update_Global_client(client=Client, cluster=false, slots=Dict{Int, Vector{String}})
+    
+    cluster_check  = execute(["INFO", "CLUSTER"], client)
+
+    if collect(eachsplit(collect(eachsplit(cluster_check,"\r"))[2],":"))[2] == "1"
+        @info "Cluster mode detected - configuring node connections for cluster mode"
+        node_connections = configure_client_cluster(client)
+        cluster = true
+
+    else
+        @info "Single instance Redis in use"
+        node_connections = configure_client_single(client)
+        cluster = false
+    end
+    update_slots(slots, node_connections)
+
+    if  isdefined(GLOBAL_CLIENT, :x)
+        nodes = GLOBAL_CLIENT[].clients
+        nodes["node1"] = client
+    else
+        nodes = Dict("node2"=> client)
+    end
+
+    global_client = Global_client(
+        node_connections,
+        cluster,
+        slots
+    )
+end
 
 """
     set_global_client(client::Client)
@@ -168,13 +207,14 @@ const GLOBAL_CLIENT = Ref{Client}()
 
 Sets a Client object as the `GLOBAL_CLIENT[]` instance.
 """
-function set_global_client(client::Client)
-    GLOBAL_CLIENT[] = client
+function set_global_client(client::Client, cluster::Bool, slots::Dict{Int, Vector{String}})
+    # GLOBAL_CLIENT[] = client
+    GLOBAL_CLIENT[] = update_Global_client(client, cluster, slots)
 end
 
 function set_global_client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
     client = Client(; host=host, port=port, database=database, password=password, username=username, ssl_config=ssl_config, retry_when_closed=retry_when_closed, retry_max_attemps=retry_max_attemps, retry_backoff=retry_backoff, keepalive_enable=keepalive_enable, keepalive_delay=keepalive_delay)
-    set_global_client(client)
+    set_global_client(client, false, generate_slots())
 end
 
 """
@@ -237,6 +277,7 @@ Reconnects the input client socket connection.
 """
 function reconnect!(client::Client)
     disconnect!(client)
+    @info "Attempting to reconnect to $client"
     client.socket = isnothing(client.ssl_config) ? connect(client.host, client.port) : ssl_connect(connect(client.host, client.port), client.host, client.ssl_config)
     prepare!(client)
     return client
@@ -252,6 +293,15 @@ function flush!(client::Client)
     if nb > 0
         buffer = Vector{UInt8}(undef, nb)
         readbytes!(client.socket, buffer, nb)
+    end
+end
+function flush!(client::Jedis.Global_client)
+    for (_ , c) in client.clients
+        nb = bytesavailable(c["client"].socket)
+        if nb > 0
+            buffer = Vector{UInt8}(undef, nb)
+            readbytes!(c["client"].socket, buffer, nb)
+        end
     end
 end
 
@@ -279,6 +329,14 @@ is already unusable. `Base.StatusPaused` is the true ready state.
 """
 function isclosed(client::Client)
     return status(client) == Base.StatusClosing || status(client) == Base.StatusClosed || status(client) == Base.StatusOpen
+end
+function isclosed(client::Global_client)
+    closed = []
+    for node in client.clients
+        push!(closed, status(node[2]["client"]) == Base.StatusClosing || status(node[2]["client"]) == Base.StatusClosed || status(node[2]["client"]) == Base.StatusOpen)
+    end
+    return  all(closed)
+        
 end
 
 """
@@ -401,4 +459,168 @@ function wait_until_pattern_unsubscribed(client::Client, patterns...)
             sleep(0.001)
         end
     end
+end
+
+function configure_client_single(client::Client)
+    node_connections = Dict()  
+    node_connections["instance"] = Dict()
+    node_connections["instance"]["port"] = client.port
+    node_connections["instance"]["host"] = client.host
+    node_connections["instance"]["node"] = "instance"
+    node_connections["instance"]["start_slot"] = 1
+    node_connections["instance"]["end_slot"] = 16384
+    node_connections["instance"]["node_type"] = "primary"
+
+    node_connections["instance"]["client"] =  Client(
+        port = node_connections["instance"]["port"],
+        host = node_connections["instance"]["host"]
+    )
+
+    @info "Establishing connection with: 
+            port:$(node_connections["instance"]["port"]) 
+            host:$(node_connections["instance"]["host"]) 
+            type:$(node_connections["instance"]["node_type"])"
+    return node_connections
+end
+
+function configure_client_cluster(client::Client)
+    cluster_config  = execute(["CLUSTER", "SLOTS"], client)
+    node_count = 0
+    node_connections = Dict()  
+    for shard in cluster_config
+        for (i, node) in enumerate(shard[3:end,:])
+            node_count += 1
+            node_connections[node[3]] = Dict()
+            node_connections[node[3]]["port"] = node[2]
+            node_connections[node[3]]["host"] = node[1]
+            node_connections[node[3]]["node"] = node[3]
+            node_connections[node[3]]["start_slot"] = shard[1]
+            node_connections[node[3]]["end_slot"] = shard[2]
+            node_connections[node[3]]["client"] =  Client(
+                port = node_connections[node[3]]["port"],
+                host = node_connections[node[3]]["host"]
+            )
+            if i == 1
+                node_connections[node[3]]["node_type"] = "primary"
+            else
+                node_connections[node[3]]["node_type"] = "slave"
+            end
+            @info "Establishing connection with:
+                    port:$(node_connections[node[3]]["port"]) 
+                    host:$(node_connections[node[3]]["host"]) 
+                    type:$(node_connections[node[3]]["node_type"])"
+        end
+    end
+    @info "Connected to $node_count nodes in cluster"
+    return node_connections
+end
+
+
+
+"""
+    generate_slots()
+
+Generate slots for node allocation.
+    returns a Dict with slots as keys and array of nodes as values - this is initalised as empty
+"""
+function generate_slots()
+    total_slots = 16384
+    slots = Dict(0 => String[])
+        for slot in 1:total_slots
+            slots[slot] = String[]
+        end
+    return slots
+end
+
+
+"""
+    update_slots(slots::Dict{Int, Vector{String}}, node_connections)
+
+Generate slots for node allocation per client.
+    returns a Dict with slots as keys and array of nodes as values - this is initalised as empty
+"""
+function update_slots(slots::Dict{Int, Vector{String}}, node_connections)
+
+    @info "Pre-allocating slots to nodes"
+    for (key, node) in node_connections
+        for slot in collect(node["start_slot"]:node["end_slot"])
+            push!(slots[slot], node["node"])
+        end
+    end
+    for (key, slot) in slots
+        primary = ""
+        slaves = []
+        for node in slot
+            if node_connections[node]["node_type"] == "primary"
+                primary = node_connections[node]["node"]
+            else
+                push!(slaves, node_connections[node]["node"])
+            end
+        end
+        slots[key] = vcat(primary,slaves)
+    end
+    @info "Slot allocation established"
+end
+
+const CRC16_TABLE = Ref{CRC.var"#handler#7"{CRC.var"#handler#4#8"{Multiple{UInt64}, CRC.Spec{UInt16}, CRC.Forwards{UInt64}, DataType}}}(crc(CRC_16_XMODEM))
+
+function get_hash_slot(key::String)
+    hash_temp = CRC16_TABLE[](key)
+    slot = mod(hash_temp, 16384)
+    return slot
+end
+
+function get_hash_key(key::String)
+    a = findfirst("{", key)[1]
+    return collect(eachsplit(key[a+1:end],"}"))[1]
+end
+
+function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bool=false, replica::Bool=false)
+    if keys[1] == "*" && !write
+        @info "Subscribe or publish to any node"
+        node = rand(client.clients)[1]
+    elseif keys[1] == "*" && write
+        @info "Subscribe or publish to a primary node"
+        node = get_any_primary_node(client)
+    else
+        @info "Checking for consistant slots"
+        slots = []
+        for key::String in keys
+            if occursin("{", key) && occursin("}", key)
+                key = get_hash_key(key)
+            end
+
+            push!(slots, key)
+        end
+
+        if allequal(slots)
+            slot = get_hash_slot(slots[1])
+            @info slot
+            if ~write && replica
+                @info "Redirecting to replica"
+                node = rand(client.slots[slot][2:end])
+                execute(["READONLY"], client.clients[node]["client"])
+            else
+                node = client.slots[slot][1]
+            end
+        else 
+            throw(RedisError("CROSSSLOT", "Keys in request don't hash to the same slot"))
+        end
+        
+    end
+
+    client_connection = client.clients[node]["client"]
+    return client_connection
+end
+
+function get_client(client::Client, keys::Vector{String}, write::Bool=false, replica::Bool=false)
+    return client
+end
+
+function get_any_primary_node(client)
+    node = rand(client.clients)
+    while node[2]["node_type"] != "primary"
+        node = rand(client.clients)
+    end
+    return node[1]
 end

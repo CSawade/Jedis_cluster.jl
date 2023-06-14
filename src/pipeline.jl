@@ -25,13 +25,16 @@ julia> execute(pipe)
 ```
 """
 mutable struct Pipeline
-    client::Client
+    client::Global_client
     resp::Vector{String}
+    order::Vector{Int}
+    client_exec::Vector{String}
     filter_multi_exec::Bool
     multi_exec::Bool
     multi_exec_bitmask::Vector{Bool}
 end
-Pipeline(client::Client=get_global_client(); filter_multi_exec::Bool=false) = Pipeline(client, [], filter_multi_exec, true, [])
+# Pipeline(client::Global_client=get_global_client(); filter_multi_exec::Bool=false) = Pipeline(client, [], filter_multi_exec, true, [])
+Pipeline(client::Global_client=get_global_client(); filter_multi_exec::Bool=false) = Pipeline(client, [], [], [], filter_multi_exec, true, [])
 
 """
     add!(pipe::Pipeline, command)
@@ -58,13 +61,15 @@ function add!(pipe::Pipeline, command::AbstractString)
 end
 
 """
-    add!(pipe::Pipeline, command)
+    flush!(pipe::Pipeline)
 
 Flushes the underlying client socket and resets the pipeline in to a clean slate.
 """
 function flush!(pipe::Pipeline)
     flush!(pipe.client)
     pipe.resp = []
+    pipe.order = []
+    pipe.client_exec = []
     pipe.multi_exec = false
     pipe.multi_exec_bitmask = []
 end
@@ -96,13 +101,55 @@ julia> pipeline() do pipe
  nothing  # Nil response from final lpop
 ```
 """
-function Base.pipeline(fn::Function; client::Client=get_global_client(), filter_multi_exec=false)
+function Base.pipeline(fn::Function; client::Global_client=get_global_client(), filter_multi_exec=false)
     pipe = Pipeline(client; filter_multi_exec=filter_multi_exec)
     fn(pipe)
     return execute(pipe)
 end
-function Base.pipeline(fn::Function, batch_size::Int; client::Client=get_global_client(), filter_multi_exec=false)
+function Base.pipeline(fn::Function, batch_size::Int; client::Global_client=get_global_client(), filter_multi_exec=false)
     pipe = Pipeline(client; filter_multi_exec=filter_multi_exec)
     fn(pipe)
     return execute(pipe, batch_size)
+end
+
+
+function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=false, replica::Bool=false)
+    if keys[1] == "*"
+        @info "Subscribe or publish to any node"
+        node = rand(GLOBAL_CLIENT[].clients)[1]
+    else
+        @info "Checking for consistant slots"
+        slots = []
+        for key::String in keys
+            if occursin("{", key) && occursin("}", key)
+                key = get_hash_key(key)
+            end
+
+            push!(slots, key)
+        end
+
+        if allequal(slots)
+            slot = get_hash_slot(slots[1])
+            @info slot
+            if ~write && replica
+                @info "Redirecting to replica"
+                node = rand(GLOBAL_CLIENT[].slots[slot][2:end])
+                execute(["READONLY"], GLOBAL_CLIENT[].clients[node]["client"])
+            else
+                node = GLOBAL_CLIENT[].slots[slot][1]
+            end
+        else 
+            throw(RedisError("CROSSSLOT", "Keys in request don't hash to the same slot"))
+        end
+        
+    end
+
+    push!(client.client_exec, node)
+
+    if isempty(client.order)
+        push!(client.order, 1)
+    else 
+        push!(client.order, client.order[end] + 1)
+    end
+    return client
 end

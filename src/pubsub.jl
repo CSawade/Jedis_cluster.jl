@@ -3,7 +3,9 @@
 
 Post a message to a channel.
 """
-publish(channel, message; client=get_global_client()) = execute(["PUBLISH", channel, message], client)
+publish(channel, message; client=get_global_client()) = execute(["PUBLISH", channel, message], Jedis.get_client(client, ["*"], true, false))
+
+spublish(shard_channel, message; client=get_global_client()) = execute(["SPUBLISH", shard_channel, message], Jedis.get_client(client, [shard_channel], true, false))
 
 """
     subscribe(fn::Function,
@@ -69,7 +71,7 @@ julia> subscriber.subscriptions
 Set{String}()
 ```
 """
-function subscribe(fn::Function, channel, channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=get_global_client())
+function subscribe(fn::Function, channel, channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=Jedis.get_client(get_global_client(), ["*"], false, false))
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
     end
@@ -113,12 +115,61 @@ function subscribe(fn::Function, channel, channels...; stop_fn::Function=(msg) -
     end
 end
 
+function ssubscribe(fn::Function, shard_channel, shard_channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=Jedis.get_client(get_global_client(), [shard_channel, shard_channels...], false, false))
+    if client.is_subscribed
+        throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
+    end
+    
+    @lock client.lock client.subscriptions = Set([shard_channel, shard_channels...])
+    execute(["SSUBSCRIBE", client.subscriptions...], client)
+    @lock client.lock set_subscribed!(client)
+    yield()
+    err = nothing
+
+    try
+        while true
+            msg = recv(client.socket)
+            isnothing(msg) && throw(_UVError("readline", UV_ECONNABORTED))
+            type, chnl = msg
+
+            if type == "smessage" && chnl in client.subscriptions
+                fn(msg)
+                stop_fn(msg) && break
+                
+            elseif type == "unsubscribe"
+                if isnothing(chnl)
+                    @lock client.lock client.subscriptions = Set{String}()
+                elseif chnl in client.subscriptions
+                    @lock client.lock delete!(client.subscriptions, chnl)
+                end
+                
+                isempty(client.subscriptions) && break
+            end
+        end
+    catch err
+        err_cb(err)
+    finally
+        if !isempty(client.subscriptions)
+            isclosed(client) || unsubscribe(client.subscriptions...; client=client)
+            @lock client.lock client.subscriptions = Set{String}()
+            @lock client.lock flush!(client)
+        end
+        @lock client.lock set_unsubscribed!(client)
+        @lock client.lock err isa Base.IOError || reconnect!(client)
+    end
+end
+
+
 """
     unsubscribe([channels...]) -> nothing
 
 Unsubscribes the client from the given channels, or from all of them if none is given.
 """
-unsubscribe(channels...; client=get_global_client()) = execute_without_recv(["UNSUBSCRIBE", channels...], client)
+function unsubscribe(channels...; client=get_global_client()) 
+    for (key, node) in client.clients
+        execute_without_recv(["UNSUBSCRIBE", channels...], node["client"])
+    end
+end
 
 """
     psubscribe(fn::Function,
@@ -185,7 +236,7 @@ julia> subscriber.psubscriptions
 Set{String}()
 ```
 """
-function psubscribe(fn::Function, pattern, patterns...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=get_global_client())
+function psubscribe(fn::Function, pattern, patterns...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=Jedis.get_client(get_global_client(), ["*"], false, false))
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
     end
@@ -234,4 +285,10 @@ end
 
 Unsubscribes the client from the given patterns, or from all of them if none is given.
 """
-punsubscribe(patterns...; client=get_global_client()) = execute_without_recv(["PUNSUBSCRIBE", patterns...], client)
+# punsubscribe(patterns...; client=get_global_client()) = execute_without_recv(["PUNSUBSCRIBE", patterns...], Jedis.get_client(get_global_client(), ["*"], false, false))
+
+function punsubscribe(patterns...; client=get_global_client()) 
+    for (key, node) in client.clients
+        execute_without_recv(["UNSUBSCRIBE", patterns...], node["client"])
+    end
+end

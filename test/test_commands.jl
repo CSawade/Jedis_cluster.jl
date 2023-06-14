@@ -50,7 +50,7 @@ end
     @test hmget("key", "f1", "f2", "doesnotexist") == ["1", "2", nothing]
     @test hdel("key", "f1") == 1
     @test isnothing(hget("key", "f1"))
-    @test flushall() == "OK" && isnothing(get("key"))
+    @test flushall() == "OK" && isnothing(hget("key","f3"))
 end
 
 @testset "LIST" begin
@@ -95,8 +95,9 @@ end
 
 @testset "QUIT" begin
     @test quit() == "OK"
-    @test_throws Base.IOError ping()
     @test isclosed(get_global_client())
+    @test_throws Base.IOError ping()
+
 end
 
 set_global_client(retry_when_closed=true)

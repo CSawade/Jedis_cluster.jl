@@ -12,17 +12,20 @@ export Client, Pipeline, RedisError, get_global_client, set_global_client, get_s
 using Sockets
 using MbedTLS
 using UUIDs: uuid4
+using CRC
 import Base: copy, showerror, get, pipeline
 
 include("exceptions.jl")
 include("utilities.jl")
-include("stream.jl")
 include("client.jl")
+include("stream.jl")
 include("pipeline.jl")
 include("protocol.jl")
 include("execute.jl")
 include("commands.jl")
 include("pubsub.jl")
 include("lock.jl")
+
+
 
 end # module

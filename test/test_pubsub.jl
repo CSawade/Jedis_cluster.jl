@@ -2,12 +2,12 @@ set_global_client()
 
 @testset "SUBSCRIBE" begin
     channels = ["first", "second", "third"]
-    publisher = Client()
+    publisher = set_global_client()
     subscriber = Client()
     messages = []
     @test subscriber.is_subscribed == false
     
-    @async subscribe(channels...; client=subscriber) do msg
+    @async subscribe(channels..., client=subscriber) do msg
         push!(messages, msg)
     end
     
