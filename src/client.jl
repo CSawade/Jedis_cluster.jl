@@ -157,7 +157,9 @@ function ssl_connect(host::AbstractString, port::Integer, ssl_config::MbedTLS.SS
     return io
 end
 
+"""
 
+"""
 mutable struct Global_client
     clients::Dict{String, Any}
     cluster::Bool
@@ -167,7 +169,7 @@ end
 """
     GLOBAL_CLIENT = Ref{GLOBAL_CLIENT}()
 
-Reference to a global Client object.
+Reference to a Global Client object.
 """
 const GLOBAL_CLIENT = Ref{Global_client}()
 
@@ -332,8 +334,8 @@ function isclosed(client::Client)
 end
 function isclosed(client::Global_client)
     closed = []
-    for node in client.clients
-        push!(closed, status(node[2]["client"]) == Base.StatusClosing || status(node[2]["client"]) == Base.StatusClosed || status(node[2]["client"]) == Base.StatusOpen)
+    for (key, node) in client.clients
+        push!(closed, status(node["client"]) == Base.StatusClosing || status(node["client"]) == Base.StatusClosed || status(node["client"]) == Base.StatusOpen)
     end
     return  all(closed)
         
@@ -583,7 +585,6 @@ function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bo
         @info "Subscribe or publish to a primary node"
         node = get_any_primary_node(client)
     else
-        @info "Checking for consistant slots"
         slots = []
         for key::String in keys
             if occursin("{", key) && occursin("}", key)
@@ -618,9 +619,26 @@ function get_client(client::Client, keys::Vector{String}, write::Bool=false, rep
 end
 
 function get_any_primary_node(client)
-    node = rand(client.clients)
-    while node[2]["node_type"] != "primary"
-        node = rand(client.clients)
+    (key, node) = rand(client.clients)
+    while node["node_type"] != "primary"
+        (key, node) = rand(client.clients)
     end
-    return node[1]
+    return key
+end
+
+function get_primary_nodes(client)
+    nodes = []
+    for (key, node) in client.clients
+        if node["node_type"] == "primary"
+            push!(nodes, node)
+        end
+    end
+    return nodes
+end
+function get_all_nodes(client)
+    nodes = []
+    for (key, node) in client.clients
+        push!(nodes, node)
+    end
+    return nodes
 end

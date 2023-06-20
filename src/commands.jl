@@ -1,40 +1,80 @@
+function run_on_all_primary_nodes(fn::Function, client::Jedis.Global_client)
+    nodes = get_primary_nodes(client)
+    responses = []
+    for node in nodes       
+        push!(responses, response_format(fn(node["client"]))...)
+    end
+    if  allsame(responses) && ~isempty(responses) && (responses[1] == "OK" || responses[1] == "PONG")
+        responses = responses[1]
+    end
+
+    return responses
+end
+function run_on_all_primary_nodes(fn::Function, client::Client)
+    return fn(client)
+end
+function run_on_all_nodes(fn::Function, client::Jedis.Global_client)
+    nodes = get_all_nodes(client)
+    responses = []
+    for node in nodes       
+        push!(responses, response_format(fn(node["client"]))...)
+    end
+    if  allsame(responses) && ~isempty(responses) && (responses[1] == "OK" || responses[1] == "PONG")
+        responses = responses[1]
+    end
+
+    return responses
+end
+function run_on_all_nodes(fn::Function, client::Client)
+    return fn(client)
+end
+allsame(x) = all(y -> y == first(x), x)
+function response_format(a::String)
+    # code for handling a single Int
+    return [a]
+end
+function response_format(a::Vector{Any})
+     # code handling a vector containing type Any
+    return a
+end
+function response_format(a::Vector{String})
+    # code handling a vector containing only Strings
+    return a
+end
+
 """
     auth(password[, username])
 
 Authenticate to the server.
 """
-# auth(password, username="", client::Client) = execute(["AUTH", username, password], client)
-auth(password, username=""; client=get_global_client()) = execute(["AUTH", username, password], get_client(client, ["*"], true, false))
+auth(password, username=""; client=get_global_client()) = Jedis.run_on_all_primary_nodes(client) do node_client
+    execute(["AUTH", username, password], node_client)
+end
 
 """
     select(database)
 
 Change the selected database for the current connection.
 """
-select(database; client=get_global_client()) = execute(["SELECT", database], get_client(client, ["*"], true, false))
-
+select(database; client=get_global_client()) = Jedis.run_on_all_primary_nodes(client) do node_client
+    execute(["SELECT", database], get_client(node_client, ["*"], true, false))
+end
 """
     ping()
 
 Ping the server.
 """
-ping(; client=get_global_client()) = execute(["PING"], get_client(client, ["*"], true, false))
-
+ping(; client=get_global_client()) = Jedis.run_on_all_primary_nodes(client) do node_client
+    execute(["PING"], get_client(node_client, ["*"], true, false))
+end
 
 """
     flushdb([; async=false])
 
 Remove all keys from the current database.
 """
-flushdb(; async=false, client=get_global_client()) = flushdb_node(client, async)
-function flushdb_node(client, async)
-    msg = "nok"
-    for node in client.clients 
-        if node[2]["node_type"] == "primary"
-            msg = execute(["FLUSHDB", async ? "ASYNC" : ""], client.clients[node[1]]["client"])
-        end
-    end
-    return msg
+flushdb(; async=false, client=get_global_client()) = Jedis.run_on_all_primary_nodes(client) do node_client
+    execute(["FLUSHDB", async ? "ASYNC" : ""], node_client)
 end
 
 """
@@ -42,15 +82,8 @@ end
 
 Remove all keys from all databases.
 """
-flushall(; async=false, client=get_global_client()) = flushall_node(client, async)
-function flushall_node(client, async)
-    msg = "nok"
-    for node in client.clients 
-        if node[2]["node_type"] == "primary"
-            msg = execute(["FLUSHALL", async ? "ASYNC" : ""], client.clients[node[1]]["client"])
-        end
-    end
-    return msg
+flushall(; async=false, client=get_global_client()) = Jedis.run_on_all_primary_nodes(client) do node_client
+    execute(["FLUSHALL", async ? "ASYNC" : ""], node_client)
 end
 
 """
@@ -58,13 +91,8 @@ end
 
 Close the connection.
 """
-quit(; client=get_global_client()) = quitall_node(client)
-function quitall_node(client)
-    msg = "nok"
-    for node in client.clients 
-        msg = execute(["QUIT"], client.clients[node[1]]["client"])
-    end
-    return msg
+quit(; client=get_global_client()) = Jedis.run_on_all_nodes(client) do node_client
+    execute(["QUIT"], node_client)
 end
 
 """
@@ -130,7 +158,9 @@ Find all keys matching the pattern.
 !!! compat "Julia 1.6"
     `Jedis.keys` is not exported as the interface conflicts with `Base.keys`.
 """
-keys(pattern; client=get_global_client()) = execute(["KEYS", pattern], get_client(client, ["*"], false, false))
+keys(pattern; client=get_global_client()) = Jedis.run_on_all_primary_nodes(client) do node_client
+        execute(["KEYS", pattern], node_client)
+end
 
 """
     hkeys(key)

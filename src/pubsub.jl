@@ -90,7 +90,7 @@ function subscribe(fn::Function, channel, channels...; stop_fn::Function=(msg) -
 
             if type == "message" && chnl in client.subscriptions
                 fn(msg)
-                stop_fn(msg) && break
+                stop_fn(msg) && break 
                 
             elseif type == "unsubscribe"
                 if isnothing(chnl)
