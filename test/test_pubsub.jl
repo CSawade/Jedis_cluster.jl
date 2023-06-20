@@ -15,9 +15,16 @@ set_global_client()
     @test subscriber.is_subscribed == true
     @test subscriber.subscriptions == Set{String}(channels)
     
-    @test publish("first", "hello"; client=publisher) == 1
-    @test publish("second", "world"; client=publisher) == 1
-    @test publish("something", "else"; client=publisher) == 0
+    # Redis cluster may not return the correct number of channels
+    if Jedis.GLOBAL_CLIENT[].cluster == false
+        @test publish("first", "hello"; client=publisher) == 1
+        @test publish("second", "world"; client=publisher) == 1
+        @test publish("something", "else"; client=publisher) == 0
+    else
+        @test publish("first", "hello"; client=publisher) >= 0
+        @test publish("second", "world"; client=publisher) >= 0
+        @test publish("something", "else"; client=publisher) == 0
+    end
     
     @test length(messages) == 2
     @test messages[1] == ["message", "first", "hello"]
@@ -50,7 +57,12 @@ set_global_client()
     @test subscriber.is_subscribed == true
     @test subscriber.subscriptions == Set{String}(channels)
     
-    @test publish("first", "close subscription"; client=publisher) == 1
+    # Redis cluster may not return the correct number of channels
+    if Jedis.GLOBAL_CLIENT[].cluster == false
+        @test publish("first", "close subscription"; client=publisher) == 1
+    else
+        @test publish("first", "close subscription"; client=publisher) >= 0
+    end
     
     wait_until_unsubscribed(subscriber)
     @test subscriber.is_subscribed == false

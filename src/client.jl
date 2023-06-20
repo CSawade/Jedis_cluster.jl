@@ -177,7 +177,7 @@ function update_Global_client(client=Client, cluster=false, slots=Dict{Int, Vect
     
     cluster_check  = execute(["INFO", "CLUSTER"], client)
 
-    if collect(eachsplit(collect(eachsplit(cluster_check,"\r"))[2],":"))[2] == "1"
+    if collect(split(collect(split(cluster_check, "\r"))[2], ":"))[2] == "1"
         @info "Cluster mode detected - configuring node connections for cluster mode"
         node_connections = configure_client_cluster(client)
         cluster = true
@@ -220,7 +220,7 @@ function set_global_client(; host="127.0.0.1", port=6379, database=0, password="
 end
 
 """
-    get_global_client() -> Client
+    get_global_client() -> GLOBAL_CLIENT
 
 Retrieves the `GLOBAL_CLIENT[]` instance, if unassigned then initialises it with default values 
 `host="127.0.0.1"`, `port=6379`, `database=0`, `password=""`, `username=""`.
@@ -594,6 +594,7 @@ function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bo
             push!(slots, key)
         end
 
+        allequal(x) = all(y -> y == x[1], x)
         if allequal(slots)
             slot = get_hash_slot(slots[1])
             @info slot

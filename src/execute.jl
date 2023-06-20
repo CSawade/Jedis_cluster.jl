@@ -115,6 +115,12 @@ function execute(pipe::Pipeline)
 
     messages = []
     order = []
+    if pipe.filter_multi_exec == true
+        # Filter first and last element
+        pipe.client_exec = pipe.client_exec[2:end-1]
+        pipe.order = pipe.order[2:end-1]
+    end
+
     try
         for client in unique(pipe.client_exec)
             node = pipe.client.clients[client]["client"]

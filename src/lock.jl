@@ -1,5 +1,5 @@
 """
-    acquire_lock(lock_key[, lock_value=string(uuid4()); client::Client=get_global_client(), timeout=nothing, seconds_between_checks=0.1])
+    acquire_lock(lock_key[, lock_value=string(uuid4()); client=get_global_client(), timeout=nothing, seconds_between_checks=0.1])
 
 Creates a redis lock key, blocks if the lock already exists, returns the `lock_value`.
 
@@ -9,7 +9,7 @@ locks within a do-block context.
 # Arguments
 - `lock_key`: Name of the redis lock key.
 - `lock_value=string(uuid4())`: Token value of the redis lock, ensures that only owners of a lock can release it, defaults to UUID.
-- `client::Client=get_global_client()`: Redis client instance, defualts to global instance.
+- `client=get_global_client()`: Redis client instance, defualts to global instance.
 - `timeout=nothing`: Timeout of the lock in seconds, if `nothing` then lock will not timeout.
 - `seconds_between_checks=0.1`: Sleep time (seconds) between each lock exists check.
 
@@ -25,11 +25,11 @@ julia> release_lock("example_lock", "lock_token")
 true  # Returns true if the lock value matches and lock was successfully released
 ```
 """
-function acquire_lock(lock_key, lock_value=string(uuid4()); client::Client=get_global_client(), timeout=nothing, seconds_between_checks=0.1)
+function acquire_lock(lock_key, lock_value=string(uuid4()); client=get_global_client(), timeout=nothing, seconds_between_checks=0.1)
     while true
         px = isnothing(timeout) ? [] : ["PX", timeout * 1000]
-        was_set = !isnothing(execute(["SET", lock_key, lock_value, "NX", px...], client))
-        
+        was_set = !isnothing(execute(["SET", lock_key, lock_value, "NX", px...], Jedis.get_client(client, [lock_key], true, false)))
+
         if was_set
             return lock_value
         end
@@ -39,7 +39,7 @@ function acquire_lock(lock_key, lock_value=string(uuid4()); client::Client=get_g
 end
 
 """
-    release_lock(lock_key, lock_value[; client::Client=get_global_client()])::Bool
+    release_lock(lock_key, lock_value[; client=get_global_client()])::Bool
 
 Returns `true` if the lock value matches and lock was successfully released, `false` otherwise.
 
@@ -58,9 +58,9 @@ julia> release_lock("example_lock", "lock_token")
 true  # Returns true if the lock value matches and lock was successfully released
 ```
 """
-function release_lock(lock_key, lock_value; client::Client=get_global_client())::Bool
-    if get(lock_key; client=client) == lock_value
-        del(lock_key; client=client)
+function release_lock(lock_key, lock_value; client=get_global_client())::Bool
+    if get(lock_key; client=Jedis.get_client(client, [lock_key], true, false)) == lock_value
+        del(lock_key; client=Jedis.get_client(client, [lock_key], true, false))
         return true
     else
         return false
@@ -68,14 +68,14 @@ function release_lock(lock_key, lock_value; client::Client=get_global_client()):
 end
 
 """
-    redis_lock(fn::Function, lock_key[, lock_value=string(uuid4()); client::Client=get_global_client(), timeout=nothing, seconds_between_checks=0.1])
+    redis_lock(fn::Function, lock_key[, lock_value=string(uuid4()); client=get_global_client(), timeout=nothing, seconds_between_checks=0.1])
 
 Enters a redis lock context, blocks if the lock already exists.
 
 # Arguments
 - `lock_key`: Name of the redis lock key.
 - `lock_value=string(uuid4())`: Token value of the redis lock, ensures that only owners of a lock can release it, defaults to UUID.
-- `client::Client=get_global_client()`: Redis client instance, defualts to global instance.
+- `client=get_global_client()`: Redis client instance, defualts to global instance.
 - `timeout=nothing`: Timeout of the lock in seconds, if `nothing` then lock will not timeout.
 - `seconds_between_checks=0.1`: Sleep time (seconds) between each lock exists check.
 
@@ -94,19 +94,19 @@ julia> redis_lock("example_lock") do
        end
 ```
 """
-function redis_lock(fn::Function, lock_key, lock_value=string(uuid4()); client::Client=get_global_client(), timeout=nothing, seconds_between_checks=0.1)
-    acquire_lock(lock_key, lock_value; client=client, timeout=timeout, seconds_between_checks=seconds_between_checks)
-    
+function redis_lock(fn::Function, lock_key, lock_value=string(uuid4()); client=get_global_client(), timeout=nothing, seconds_between_checks=0.1)
+    acquire_lock(lock_key, lock_value; client=Jedis.get_client(client, [lock_key], true, false), timeout=timeout, seconds_between_checks=seconds_between_checks)
+
     try
         fn()
     finally
-        release_lock(lock_key, lock_value; client=client)
+        release_lock(lock_key, lock_value; client=Jedis.get_client(client, [lock_key], true, false))
     end
 end
 
 """
-    isredislocked(lock_key[; client::Client=get_global_client()])
+    isredislocked(lock_key[; client=get_global_client()])
 
 Returns `true` if `lock_key` exists, otherwise `false`.
 """
-isredislocked(lock_key; client::Client=get_global_client()) = exists(lock_key; client=client) == 1
+isredislocked(lock_key; client=get_global_client()) = exists(lock_key; client=Jedis.get_client(client, [lock_key], true, false)) == 1

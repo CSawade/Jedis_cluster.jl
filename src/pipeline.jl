@@ -118,7 +118,7 @@ function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=fa
         @info "Subscribe or publish to any node"
         node = rand(GLOBAL_CLIENT[].clients)[1]
     else
-        @info "Checking for consistant slots"
+        # @info "Checking for consistant slots"
         slots = []
         for key::String in keys
             if occursin("{", key) && occursin("}", key)
@@ -128,9 +128,9 @@ function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=fa
             push!(slots, key)
         end
 
+        allequal(x) = all(y->y==x[1],x)
         if allequal(slots)
             slot = get_hash_slot(slots[1])
-            @info slot
             if ~write && replica
                 @info "Redirecting to replica"
                 node = rand(GLOBAL_CLIENT[].slots[slot][2:end])

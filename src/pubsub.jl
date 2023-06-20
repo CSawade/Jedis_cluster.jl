@@ -165,10 +165,13 @@ end
 
 Unsubscribes the client from the given channels, or from all of them if none is given.
 """
-function unsubscribe(channels...; client=get_global_client()) 
-    for (key, node) in client.clients
-        execute_without_recv(["UNSUBSCRIBE", channels...], node["client"])
-    end
+function unsubscribe(channels...; client=Jedis.get_client(get_global_client(), ["*"], false, false))
+    # for (key, node) in client.clients
+    #     @info node
+    # execute_without_recv(["UNSUBSCRIBE", channels...], node["client"])
+    execute_without_recv(["UNSUBSCRIBE", channels...], client)
+
+    # end
 end
 
 """
@@ -287,8 +290,8 @@ Unsubscribes the client from the given patterns, or from all of them if none is 
 """
 # punsubscribe(patterns...; client=get_global_client()) = execute_without_recv(["PUNSUBSCRIBE", patterns...], Jedis.get_client(get_global_client(), ["*"], false, false))
 
-function punsubscribe(patterns...; client=get_global_client()) 
-    for (key, node) in client.clients
-        execute_without_recv(["UNSUBSCRIBE", patterns...], node["client"])
-    end
+function punsubscribe(patterns...; client=Jedis.get_client(get_global_client(), ["*"], false, false))
+    # for (key, node) in client.clients
+    execute_without_recv(["PUNSUBSCRIBE", patterns...], client)
+    # end
 end
