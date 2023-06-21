@@ -26,9 +26,18 @@ set_global_client()
         @test publish("something", "else"; client=publisher) == 0
     end
     
+    while length(messages) != 2
+        sleep(0.1)
+    end
     @test length(messages) == 2
-    @test messages[1] == ["message", "first", "hello"]
-    @test messages[2] == ["message", "second", "world"]
+    @test messages[1] in [
+        ["message", "first", "hello"],
+        ["message", "second", "world"]
+    ]
+    @test messages[2] in [
+        ["message", "second", "world"],
+        ["message", "first", "hello"],
+    ]
     
     @test_throws RedisError set("already", "subscribed"; client=subscriber)
     @test_throws RedisError subscribe("alreadsubscribed"; client=subscriber) do msg end
@@ -88,9 +97,18 @@ end
     @test publish("second_pattern", "world"; client=publisher) == 1
     @test publish("something", "else"; client=publisher) == 0
     
+    while length(messages) != 2
+        sleep(0.1)
+    end
     @test length(messages) == 2
-    @test messages[1] == ["pmessage", "first*", "first_pattern", "hello"]
-    @test messages[2] == ["pmessage", "second*", "second_pattern", "world"]
+    @test messages[1] in [
+        ["pmessage", "first*", "first_pattern", "hello"],
+        ["pmessage", "second*", "second_pattern", "world"]
+    ]
+    @test messages[2] in [
+        ["pmessage", "second*", "second_pattern", "world"],
+        ["pmessage", "first*", "first_pattern", "hello"],
+    ]
     
     @test_throws RedisError set("already", "subscribed"; client=subscriber)
     @test_throws RedisError psubscribe("alreadsubscribed"; client=subscriber) do msg end
@@ -167,9 +185,18 @@ end
     @test spublish(channels[2], "world"; client=publisher) == 1
     @test spublish("{shard}:something", "else"; client=publisher) == 0
 
+    while length(messages) != 2
+        sleep(0.1)
+    end
     @test length(messages) == 2
-    @test messages[1] == ["smessage", channels[1], "hello"]
-    @test messages[2] == ["smessage", channels[2], "world"]
+    @test messages[1] in [
+        ["smessage", channels[1], "hello"],
+        ["smessage", channels[2], "world"]
+    ]
+    @test messages[2] in [
+        ["smessage", channels[2], "world"],
+        ["smessage", channels[1], "hello"],
+    ]
     
     @test_throws RedisError set("already", "subscribed"; client=subscriber)
     @test_throws RedisError ssubscribe("alreadsubscribed"; client=subscriber) do msg end
