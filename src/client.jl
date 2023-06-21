@@ -1,5 +1,5 @@
 """
-    Client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60]) -> Client
+    Client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60]) -> Client
 
 Creates a Client instance connecting and authenticating to a Redis host, provide an `MbedTLS.SSLConfig` 
 (see `get_ssl_config`) for a secured Redis connection (SSL/TLS).
@@ -68,7 +68,7 @@ mutable struct Client
     keepalive_delay::Int
 end
 
-function Client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
+function Client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
 
     client = Client(
         host,
@@ -84,7 +84,7 @@ function Client(; host="127.0.0.1", port=6379, database=0, password="", username
         Set{String}(),
         Set{String}(),
         retry_when_closed,
-        retry_max_attemps,
+        retry_max_attempts,
         retry_backoff,
         keepalive_enable,
         keepalive_delay
@@ -207,7 +207,7 @@ end
 
 """
     set_global_client(client::Client)
-    set_global_client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60])
+    set_global_client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60])
 
 Sets a Client object as the `GLOBAL_CLIENT[]` instance.
 """
@@ -216,8 +216,8 @@ function set_global_client(client::Client, cluster::Bool, slots::Dict{Int, Vecto
     GLOBAL_CLIENT[] = update_Global_client(client, cluster, slots)
 end
 
-function set_global_client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
-    client = Client(; host=host, port=port, database=database, password=password, username=username, ssl_config=ssl_config, retry_when_closed=retry_when_closed, retry_max_attemps=retry_max_attemps, retry_backoff=retry_backoff, keepalive_enable=keepalive_enable, keepalive_delay=keepalive_delay)
+function set_global_client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
+    client = Client(; host=host, port=port, database=database, password=password, username=username, ssl_config=ssl_config, retry_when_closed=retry_when_closed, retry_max_attempts=retry_max_attempts, retry_backoff=retry_backoff, keepalive_enable=keepalive_enable, keepalive_delay=keepalive_delay)
     set_global_client(client, false, generate_slots())
 end
 
@@ -494,7 +494,16 @@ function configure_client_single(client::Client)
 
     node_connections["instance"]["client"] =  Client(
         port = node_connections["instance"]["port"],
-        host = node_connections["instance"]["host"]
+        host = node_connections["instance"]["host"],
+        database=client.database,
+        password=client.password,
+        username=client.username,
+        ssl_config=client.ssl_config,
+        retry_when_closed=client.retry_when_closed,
+        retry_max_attempts=client.retry_max_attempts,
+        retry_backoff=client.retry_backoff,
+        keepalive_enable=client.keepalive_enable,
+        keepalive_delay=client.keepalive_delay
     )
 
     @info "Establishing connection with: 
@@ -519,7 +528,16 @@ function configure_client_cluster(client::Client)
             node_connections[node[3]]["end_slot"] = shard[2]
             node_connections[node[3]]["client"] =  Client(
                 port = node_connections[node[3]]["port"],
-                host = node_connections[node[3]]["host"]
+                host = node_connections[node[3]]["host"],
+                database=client.database,
+                password=client.password,
+                username=client.username,
+                ssl_config=client.ssl_config,
+                retry_when_closed=client.retry_when_closed,
+                retry_max_attempts=client.retry_max_attempts,
+                retry_backoff=client.retry_backoff,
+                keepalive_enable=client.keepalive_enable,
+                keepalive_delay=client.keepalive_delay
             )
             if i == 1
                 node_connections[node[3]]["node_type"] = "primary"
@@ -593,7 +611,7 @@ end
 
 function get_hash_key(key::String)
     a = findfirst("{", key)[1]
-    return collect(eachsplit(key[a+1:end],"}"))[1]
+    return collect(split(key[a+1:end],"}"))[1]
 end
 
 function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bool=false, replica::Bool=false)

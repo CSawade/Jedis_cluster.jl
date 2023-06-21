@@ -29,18 +29,20 @@ end
     @test flushdb() == "OK" && isnothing(get("key"))
 end
 
-@testset "MULTI EXEC" begin
-    @test multi() == "OK"
-    @test set("key", "value") == "QUEUED"
-    @test get("key") == "QUEUED"
-    @test get("key") == "QUEUED"
-    @test exec() == ["OK", "value", "value"]
-    @test ["OK", "value", "value"] == multi_exec() do 
-        set("key", "value")
-        get("key")
-        get("key")
+if Jedis.GLOBAL_CLIENT[].cluster == false  # Redis cluster mode does not support MULTI EXEC
+    @testset "MULTI EXEC" begin
+        @test multi() == "OK"
+        @test set("key", "value") == "QUEUED"
+        @test get("key") == "QUEUED"
+        @test get("key") == "QUEUED"
+        @test exec() == ["OK", "value", "value"]
+        @test ["OK", "value", "value"] == multi_exec() do 
+            set("key", "value")
+            get("key")
+            get("key")
+        end
+        @test flushall() == "OK" && isnothing(get("key"))
     end
-    @test flushall() == "OK" && isnothing(get("key"))
 end
 
 @testset "HASH" begin
@@ -54,25 +56,31 @@ end
 end
 
 @testset "LIST" begin
-    @test lpush("mylist", 3, 2, 1) == 3
-    @test rpush("mylist", 4, 5, 6) == 6
-    @test llen("mylist") == 6
-    @test lrange("mylist", 0, -1) == ["1", "2", "3", "4", "5", "6"]
-    @test lpop("mylist") == "1"
-    @test rpop("mylist") == "6"
-    @test lrange("mylist", 0, -1) == ["2", "3", "4", "5"]
+    if Jedis.GLOBAL_CLIENT[].cluster == false
+        keys = ["mylist", "otherlist"]  # Redis non-cluster mode, keys can be across slots
+    else
+        keys = ["{mylist}:1", "{mylist}:2"]  # Redis cluster mode, keys must be in the same slot
+    end
+
+    @test lpush(keys[1], 3, 2, 1) == 3
+    @test rpush(keys[1], 4, 5, 6) == 6
+    @test llen(keys[1]) == 6
+    @test lrange(keys[1], 0, -1) == ["1", "2", "3", "4", "5", "6"]
+    @test lpop(keys[1]) == "1"
+    @test rpop(keys[1]) == "6"
+    @test lrange(keys[1], 0, -1) == ["2", "3", "4", "5"]
     flushall()
     @test begin
-        task = @async blpop("mylist", "otherlist") == ["otherlist", "1"]
+        task = @async blpop(keys[1], keys[2]) == [keys[2], "1"]
         other = Client()
-        lpush("otherlist", 1; client=other)
+        lpush(keys[2], 1; client=other)
         disconnect!(other)
         fetch(task)
     end
     @test begin
-        task = @async brpop("mylist", "otherlist") == ["mylist", "6"]
+        task = @async brpop(keys[1], keys[2]) == [keys[1], "6"]
         other = Client()
-        lpush("mylist", 6; client=other)
+        lpush(keys[1], 6; client=other)
         disconnect!(other)
         fetch(task)
     end
@@ -97,7 +105,6 @@ end
     @test quit() == "OK"
     @test isclosed(get_global_client())
     @test_throws Base.IOError ping()
-
 end
 
 set_global_client(retry_when_closed=true)
