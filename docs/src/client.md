@@ -16,4 +16,5 @@ wait_until_subscribed
 wait_until_unsubscribed
 wait_until_channel_unsubscribed
 wait_until_pattern_unsubscribed
+wait_until_shard_unsubscribed
 ```

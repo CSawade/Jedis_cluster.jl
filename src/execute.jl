@@ -27,7 +27,6 @@ function execute(command::AbstractArray, client::Client)
         if msg isa Exception
             throw(msg)
         end
-        @info msg
 
         return msg
     end

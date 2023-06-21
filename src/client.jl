@@ -60,6 +60,7 @@ mutable struct Client
     is_subscribed::Bool
     subscriptions::AbstractSet{<:AbstractString}
     psubscriptions::AbstractSet{<:AbstractString}
+    ssubscriptions::AbstractSet{<:AbstractString}
     retry_when_closed::Bool
     retry_max_attempts::Int
     retry_backoff::Function
@@ -79,6 +80,7 @@ function Client(; host="127.0.0.1", port=6379, database=0, password="", username
         ReentrantLock(),
         ssl_config,
         false,
+        Set{String}(),
         Set{String}(),
         Set{String}(),
         retry_when_closed,
@@ -463,6 +465,23 @@ function wait_until_pattern_unsubscribed(client::Client, patterns...)
     end
 end
 
+"""
+    wait_until_shard_unsubscribed(client::Client[, shards...])
+
+Blocks until client is unsubscribed from shard(s), leave empty to wait until unsubscribed from all shards.
+"""
+function wait_until_shard_unsubscribed(client::Client, shards...)
+    if isempty(shards)
+        while !isempty(client.ssubscriptions)
+            sleep(0.001)
+        end
+    else
+        while !isempty(intersect(client.ssubscriptions, Set{String}(shards)))
+            sleep(0.001)
+        end
+    end
+end
+
 function configure_client_single(client::Client)
     node_connections = Dict()  
     node_connections["instance"] = Dict()
@@ -597,7 +616,6 @@ function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bo
         allequal(x) = all(y -> y == x[1], x)
         if allequal(slots)
             slot = get_hash_slot(slots[1])
-            @info slot
             if ~write && replica
                 @info "Redirecting to replica"
                 node = rand(client.slots[slot][2:end])

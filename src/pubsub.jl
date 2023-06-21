@@ -5,6 +5,11 @@ Post a message to a channel.
 """
 publish(channel, message; client=get_global_client()) = execute(["PUBLISH", channel, message], Jedis.get_client(client, ["*"], true, false))
 
+"""
+    spublish(shard_channel, message)
+
+Post a message to a shard channel.
+"""    
 spublish(shard_channel, message; client=get_global_client()) = execute(["SPUBLISH", shard_channel, message], Jedis.get_client(client, [shard_channel], true, false))
 
 """
@@ -115,13 +120,39 @@ function subscribe(fn::Function, channel, channels...; stop_fn::Function=(msg) -
     end
 end
 
+"""
+    unsubscribe([channels...]) -> nothing
+
+Unsubscribes the client from the given channels, or from all of them if none is given.
+"""
+function unsubscribe(channels...; client=Jedis.get_client(get_global_client(), ["*"], false, false))
+    if typeof(client) == Client
+        execute_without_recv(["UNSUBSCRIBE", channels...], client)
+    end
+
+    if typeof(client) == GLOBAL_CLIENT
+        for (key, node) in client.clients
+            execute_without_recv(["UNSUBSCRIBE", channels...], node["client"])
+        end
+    end
+end
+
+"""
+    ssubscribe(fn::Function,
+               shard_channel,
+               shard_channels...;
+               stop_fn::Function=(msg) -> false,
+               err_cb::Function=(err) -> rethrow(err))
+
+Subscribes the client to the given shard channels in a do block. Optionally provide a stop.
+"""
 function ssubscribe(fn::Function, shard_channel, shard_channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=Jedis.get_client(get_global_client(), [shard_channel, shard_channels...], false, false))
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
     end
     
-    @lock client.lock client.subscriptions = Set([shard_channel, shard_channels...])
-    execute(["SSUBSCRIBE", client.subscriptions...], client)
+    @lock client.lock client.ssubscriptions = Set([shard_channel, shard_channels...])
+    execute(["SSUBSCRIBE", client.ssubscriptions...], client)
     @lock client.lock set_subscribed!(client)
     yield()
     err = nothing
@@ -132,26 +163,26 @@ function ssubscribe(fn::Function, shard_channel, shard_channels...; stop_fn::Fun
             isnothing(msg) && throw(_UVError("readline", UV_ECONNABORTED))
             type, chnl = msg
 
-            if type == "smessage" && chnl in client.subscriptions
+            if type == "smessage" && chnl in client.ssubscriptions
                 fn(msg)
                 stop_fn(msg) && break
-                
-            elseif type == "unsubscribe"
+            
+            elseif type == "sunsubscribe"
                 if isnothing(chnl)
-                    @lock client.lock client.subscriptions = Set{String}()
-                elseif chnl in client.subscriptions
-                    @lock client.lock delete!(client.subscriptions, chnl)
+                    @lock client.lock client.ssubscriptions = Set{String}()
+                elseif chnl in client.ssubscriptions
+                    @lock client.lock delete!(client.ssubscriptions, chnl)
                 end
                 
-                isempty(client.subscriptions) && break
+                isempty(client.ssubscriptions) && break
             end
         end
     catch err
         err_cb(err)
     finally
-        if !isempty(client.subscriptions)
-            isclosed(client) || unsubscribe(client.subscriptions...; client=client)
-            @lock client.lock client.subscriptions = Set{String}()
+        if !isempty(client.ssubscriptions)
+            isclosed(client) || unsubscribe(client.ssubscriptions...; client=client)
+            @lock client.lock client.ssubscriptions = Set{String}()
             @lock client.lock flush!(client)
         end
         @lock client.lock set_unsubscribed!(client)
@@ -159,19 +190,21 @@ function ssubscribe(fn::Function, shard_channel, shard_channels...; stop_fn::Fun
     end
 end
 
-
 """
-    unsubscribe([channels...]) -> nothing
+    sunsubscribe([shard_channels...]) -> nothing
 
-Unsubscribes the client from the given channels, or from all of them if none is given.
+Unsubscribes the client from the given shard channels.
 """
-function unsubscribe(channels...; client=Jedis.get_client(get_global_client(), ["*"], false, false))
-    # for (key, node) in client.clients
-    #     @info node
-    # execute_without_recv(["UNSUBSCRIBE", channels...], node["client"])
-    execute_without_recv(["UNSUBSCRIBE", channels...], client)
+function sunsubscribe(shard_channels...; client=Jedis.get_client(get_global_client(), [shard_channels...], false, false))
+    if typeof(client) == Client
+        execute_without_recv(["SUNSUBSCRIBE", shard_channels...], client)
+    end
 
-    # end
+    if typeof(client) == GLOBAL_CLIENT
+        for (_, node) in client.clients
+            execute_without_recv(["SUNSUBSCRIBE", shard_channels...], node["client"])
+        end
+    end
 end
 
 """
@@ -284,14 +317,18 @@ function psubscribe(fn::Function, pattern, patterns...; stop_fn::Function=(msg) 
 end
 
 """
-    unsubscribe([channels...]) -> nothing
+    punsubscribe([patterns...]) -> nothing
 
 Unsubscribes the client from the given patterns, or from all of them if none is given.
 """
-# punsubscribe(patterns...; client=get_global_client()) = execute_without_recv(["PUNSUBSCRIBE", patterns...], Jedis.get_client(get_global_client(), ["*"], false, false))
-
 function punsubscribe(patterns...; client=Jedis.get_client(get_global_client(), ["*"], false, false))
-    # for (key, node) in client.clients
-    execute_without_recv(["PUNSUBSCRIBE", patterns...], client)
-    # end
+    if typeof(client) == Client
+        execute_without_recv(["PUNSUBSCRIBE", patterns...], client)
+    end
+
+    if typeof(client) == GLOBAL_CLIENT
+        for (_, node) in client.clients
+            execute_without_recv(["PUNSUBSCRIBE", patterns...], node["client"])
+        end
+    end
 end

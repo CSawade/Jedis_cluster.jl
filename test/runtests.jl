@@ -8,7 +8,6 @@ using Dates
 
 # Passing - normal
 # Passing  - cluster 
-# TODO: Add sharded subs
 @testset "Pub/Sub" begin include("test_pubsub.jl") end
 
 # Passing - normal

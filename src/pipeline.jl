@@ -118,7 +118,7 @@ function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=fa
         @info "Subscribe or publish to any node"
         node = rand(GLOBAL_CLIENT[].clients)[1]
     else
-        # @info "Checking for consistant slots"
+        @info "Checking for consistant slots"
         slots = []
         for key::String in keys
             if occursin("{", key) && occursin("}", key)

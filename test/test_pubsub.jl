@@ -144,4 +144,83 @@ end
     end
 end
 
+@testset "SSUBSCRIBE" begin
+    if Jedis.GLOBAL_CLIENT[].cluster == false
+        channels = ["first", "second", "third"]
+    else
+        channels = ["{shard}:first", "{shard}:second", "{shard}:third"]
+    end
+    publisher = Client()
+    subscriber = Client()
+    messages = []
+    @test subscriber.is_subscribed == false
+    
+    @async ssubscribe(channels...; client=subscriber) do msg
+        push!(messages, msg)
+    end
+    
+    wait_until_subscribed(subscriber)
+    @test subscriber.is_subscribed == true
+    @test subscriber.ssubscriptions == Set{String}(channels)
+    
+    @test spublish(channels[1], "hello"; client=publisher) == 1
+    @test spublish(channels[2], "world"; client=publisher) == 1
+    @test spublish("{shard}:something", "else"; client=publisher) == 0
+
+    @test length(messages) == 2
+    @test messages[1] == ["smessage", channels[1], "hello"]
+    @test messages[2] == ["smessage", channels[2], "world"]
+    
+    @test_throws RedisError set("already", "subscribed"; client=subscriber)
+    @test_throws RedisError ssubscribe("alreadsubscribed"; client=subscriber) do msg end
+    
+    sunsubscribe(channels[1]; client=subscriber)
+    
+    wait_until_shard_unsubscribed(subscriber, channels[1])
+    @test subscriber.is_subscribed == true
+    @test subscriber.ssubscriptions == Set{String}([channels[2], channels[3]])
+    
+    @test spublish(channels[1], "not subscribed anymore"; client=publisher) == 0
+    
+    @test length(messages) == 2
+    
+    sunsubscribe(; client=subscriber) # unsubscribe from everything
+    
+    wait_until_shard_unsubscribed(subscriber)
+    @test subscriber.is_subscribed == false
+    @test isempty(subscriber.ssubscriptions)
+    
+    stop_fn(msg) = msg[end] == "close subscription"
+    
+    @async ssubscribe(channels...; stop_fn=stop_fn, client=subscriber) do msg end
+    
+    wait_until_subscribed(subscriber)
+    @test subscriber.is_subscribed == true
+    @test subscriber.ssubscriptions == Set{String}(channels)
+    
+    @test spublish(channels[1], "close subscription"; client=publisher) == 1
+    
+    wait_until_shard_unsubscribed(subscriber)
+    @test subscriber.is_subscribed == false
+    @test isempty(subscriber.ssubscriptions)
+
+    task = @async ssubscribe(channels...; client=subscriber) do msg
+        push!(messages, msg)
+    end
+    
+    wait_until_subscribed(subscriber)
+    disconnect!(subscriber)  # force close
+    
+    @test subscriber.is_subscribed == false
+    @test isempty(subscriber.ssubscriptions)
+    @test istaskdone(task)
+    try
+        fetch(task)
+    catch err
+        @test err isa TaskFailedException
+        @test err.task.result isa Base.IOError
+        @test err.task.result.code == Base.UV_ECONNABORTED
+    end
+end
+
 flushall()
