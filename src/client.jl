@@ -1,5 +1,5 @@
 """
-    Client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60]) -> Client
+    Client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60]) -> Client
 
 Creates a Client instance connecting and authenticating to a Redis host, provide an `MbedTLS.SSLConfig` 
 (see `get_ssl_config`) for a secured Redis connection (SSL/TLS).
@@ -17,7 +17,7 @@ Creates a Client instance connecting and authenticating to a Redis host, provide
 - `subscriptions::AbstractSet{<:AbstractString}`: Set of channels currently subscribed on.
 - `psubscriptions::AbstractSet{<:AbstractString}`: Set of patterns currently psubscribed on.
 - `retry_when_closed::Bool`: Set `true` to try and reconnect when client socket status is closed, defaults to `true`.
-- `retry_max_attempts`::Int`: Maximum number of retries for reconnection, defaults to `1`.
+- `retry_max_attemps`::Int`: Maximum number of retries for reconnection, defaults to `1`.
 - `retry_backoff::Function`: Retry backoff function, called after each retry and must return a single number, where that number is the sleep time (in seconds) until the next retry, accepts a single argument, the number of retries attempted.
 - `keepalive_enable::Bool=false`: Set `true` to enable TCP keep-alive.
 - `keepalive_delay::Int=60`: Initial delay in seconds, defaults to 60s, ignored when `keepalive_enable` is `false`. After delay has been reached, 10 successive probes, each spaced 1 second from the previous one, will still happen. If the connection is still lost at the end of this procedure, then the handle is destroyed with a UV_ETIMEDOUT error passed to the corresponding callback.
@@ -62,13 +62,13 @@ mutable struct Client
     psubscriptions::AbstractSet{<:AbstractString}
     ssubscriptions::AbstractSet{<:AbstractString}
     retry_when_closed::Bool
-    retry_max_attempts::Int
+    retry_max_attemps::Int
     retry_backoff::Function
     keepalive_enable::Bool
     keepalive_delay::Int
 end
 
-function Client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
+function Client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
 
     client = Client(
         host,
@@ -84,7 +84,7 @@ function Client(; host="127.0.0.1", port=6379, database=0, password="", username
         Set{String}(),
         Set{String}(),
         retry_when_closed,
-        retry_max_attempts,
+        retry_max_attemps,
         retry_backoff,
         keepalive_enable,
         keepalive_delay
@@ -207,7 +207,7 @@ end
 
 """
     set_global_client(client::Client)
-    set_global_client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60])
+    set_global_client([; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60])
 
 Sets a Client object as the `GLOBAL_CLIENT[]` instance.
 """
@@ -216,8 +216,8 @@ function set_global_client(client::Client, cluster::Bool, slots::Dict{Int, Vecto
     GLOBAL_CLIENT[] = update_Global_client(client, cluster, slots)
 end
 
-function set_global_client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attempts=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
-    client = Client(; host=host, port=port, database=database, password=password, username=username, ssl_config=ssl_config, retry_when_closed=retry_when_closed, retry_max_attempts=retry_max_attempts, retry_backoff=retry_backoff, keepalive_enable=keepalive_enable, keepalive_delay=keepalive_delay)
+function set_global_client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
+    client = Client(; host=host, port=port, database=database, password=password, username=username, ssl_config=ssl_config, retry_when_closed=retry_when_closed, retry_max_attemps=retry_max_attemps, retry_backoff=retry_backoff, keepalive_enable=keepalive_enable, keepalive_delay=keepalive_delay)
     set_global_client(client, false, generate_slots())
 end
 
@@ -258,7 +258,7 @@ function Base.copy(client::Client)
         username=client.username,
         ssl_config=client.ssl_config,
         retry_when_closed=client.retry_when_closed,
-        retry_max_attempts=client.retry_max_attempts,
+        retry_max_attemps=client.retry_max_attemps,
         retry_backoff=client.retry_backoff,
         keepalive_enable=client.keepalive_enable,
         keepalive_delay=client.keepalive_delay
@@ -347,7 +347,7 @@ end
     retry!(client::Client)
 
 Attempts to re-estiablish client socket connection, behaviour is determined by the retry parameters;
-`retry_when_closed`, `retry_max_attempts`, `retry_backoff`.
+`retry_when_closed`, `retry_max_attemps`, `retry_backoff`.
 """
 function retry!(client::Client)
     if !isclosed(client)
@@ -361,7 +361,7 @@ function retry!(client::Client)
     @warn "Client socket is closed or unusable, retrying connection to $(endpoint(client))"
     attempts = 0
 
-    while attempts < client.retry_max_attempts
+    while attempts < client.retry_max_attemps
         attempts += 1
         @info "Reconnection attempt #$attempts to $(endpoint(client))"
 
@@ -377,7 +377,7 @@ function retry!(client::Client)
             @warn "Reconnection attempt #$attempts to $(endpoint(client)) was unsuccessful"
         end
 
-        if attempts < client.retry_max_attempts
+        if attempts < client.retry_max_attemps
             backoff = client.retry_backoff(attempts)
             @info "Sleeping $(backoff)s until next reconnection attempt to $(endpoint(client))"
             sleep(backoff)
@@ -500,7 +500,7 @@ function configure_client_single(client::Client)
         username=client.username,
         ssl_config=client.ssl_config,
         retry_when_closed=client.retry_when_closed,
-        retry_max_attempts=client.retry_max_attempts,
+        retry_max_attemps=client.retry_max_attemps,
         retry_backoff=client.retry_backoff,
         keepalive_enable=client.keepalive_enable,
         keepalive_delay=client.keepalive_delay
@@ -534,7 +534,7 @@ function configure_client_cluster(client::Client)
                 username=client.username,
                 ssl_config=client.ssl_config,
                 retry_when_closed=client.retry_when_closed,
-                retry_max_attempts=client.retry_max_attempts,
+                retry_max_attemps=client.retry_max_attemps,
                 retry_backoff=client.retry_backoff,
                 keepalive_enable=client.keepalive_enable,
                 keepalive_delay=client.keepalive_delay
