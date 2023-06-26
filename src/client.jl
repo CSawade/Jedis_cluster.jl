@@ -300,11 +300,21 @@ function flush!(client::Client)
     end
 end
 function flush!(client::Jedis.Global_client)
-    for (_ , c) in client.clients
-        nb = bytesavailable(c["client"].socket)
+    if typeof(client) == Client
+        nb = bytesavailable(client.socket)
         if nb > 0
             buffer = Vector{UInt8}(undef, nb)
-            readbytes!(c["client"].socket, buffer, nb)
+            readbytes!(client.socket, buffer, nb)
+        end
+    end
+
+    if typeof(client) == GLOBAL_CLIENT
+        for (_, c) in client.clients
+            nb = bytesavailable(c["client"].socket)
+            if nb > 0
+                buffer = Vector{UInt8}(undef, nb)
+                readbytes!(c["client"].socket, buffer, nb)
+            end
         end
     end
 end
@@ -616,10 +626,10 @@ end
 
 function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bool=false, replica::Bool=false)
     if keys[1] == "*" && !write
-        @info "Subscribe or publish to any node"
+        # @info "Subscribe or publish to any node"
         node = rand(client.clients)[1]
     elseif keys[1] == "*" && write
-        @info "Subscribe or publish to a primary node"
+        # @info "Subscribe or publish to a primary node"
         node = get_any_primary_node(client)
     else
         slots = []

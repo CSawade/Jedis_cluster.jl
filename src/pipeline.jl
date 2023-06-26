@@ -115,7 +115,7 @@ end
 
 function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=false, replica::Bool=false)
     if keys[1] == "*"
-        @info "Subscribe or publish to any node"
+        # @info "Subscribe or publish to any node"
         node = rand(GLOBAL_CLIENT[].clients)[1]
     else
         slots = []
