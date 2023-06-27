@@ -146,7 +146,9 @@ end
 
 Subscribes the client to the given shard channels in a do block. Optionally provide a stop.
 """
-function ssubscribe(fn::Function, shard_channel, shard_channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=Jedis.get_client(get_global_client(), [shard_channel, shard_channels...], false, false))
+function ssubscribe(fn::Function, shard_channel, shard_channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client=get_global_client())
+    client=Jedis.get_client(client, [shard_channel, shard_channels...], false, false)
+    
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
     end
@@ -195,7 +197,8 @@ end
 
 Unsubscribes the client from the given shard channels.
 """
-function sunsubscribe(shard_channels...; client=Jedis.get_client(get_global_client(), [shard_channels...], false, false))
+function sunsubscribe(shard_channels...; client=get_global_client())
+    client=Jedis.get_client(client, [shard_channels...], false, false)
     if typeof(client) == Client
         execute_without_recv(["SUNSUBSCRIBE", shard_channels...], client)
     end
@@ -272,7 +275,8 @@ julia> subscriber.psubscriptions
 Set{String}()
 ```
 """
-function psubscribe(fn::Function, pattern, patterns...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=Jedis.get_client(get_global_client(), ["*"], false, false))
+function psubscribe(fn::Function, pattern, patterns...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client=get_global_client())
+    client = Jedis.get_client(client, ["*"], false, false)
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
     end
@@ -316,6 +320,7 @@ function psubscribe(fn::Function, pattern, patterns...; stop_fn::Function=(msg) 
     end
 end
 
+
 """
     punsubscribe([patterns...]) -> nothing
 
@@ -326,7 +331,7 @@ function punsubscribe(patterns...; client=Jedis.get_client(get_global_client(), 
         execute_without_recv(["PUNSUBSCRIBE", patterns...], client)
     end
 
-    if typeof(client) == GLOBAL_CLIENT
+    if typeof(client) == Jedis.Global_client
         for (_, node) in client.clients
             execute_without_recv(["PUNSUBSCRIBE", patterns...], node["client"])
         end

@@ -175,7 +175,7 @@ Reference to a Global Client object.
 """
 const GLOBAL_CLIENT = Ref{Global_client}()
 
-function update_Global_client(client=Client, cluster=false, slots=Dict{Int, Vector{String}})
+function update_client(client=Client, cluster=false, slots=Dict{Int, Vector{String}})
     
     cluster_check  = execute(["INFO", "CLUSTER"], client)
 
@@ -213,12 +213,20 @@ Sets a Client object as the `GLOBAL_CLIENT[]` instance.
 """
 function set_global_client(client::Client, cluster::Bool, slots::Dict{Int, Vector{String}})
     # GLOBAL_CLIENT[] = client
-    GLOBAL_CLIENT[] = update_Global_client(client, cluster, slots)
+    GLOBAL_CLIENT[] = update_client(client, cluster, slots)
+end
+function set_client(client::Client, cluster::Bool, slots::Dict{Int, Vector{String}})
+    # GLOBAL_CLIENT[] = client
+    update_client(client, cluster, slots)
 end
 
 function set_global_client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
     client = Client(; host=host, port=port, database=database, password=password, username=username, ssl_config=ssl_config, retry_when_closed=retry_when_closed, retry_max_attemps=retry_max_attemps, retry_backoff=retry_backoff, keepalive_enable=keepalive_enable, keepalive_delay=keepalive_delay)
     set_global_client(client, false, generate_slots())
+end
+function set_client_instance(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
+    client = Client(; host=host, port=port, database=database, password=password, username=username, ssl_config=ssl_config, retry_when_closed=retry_when_closed, retry_max_attemps=retry_max_attemps, retry_backoff=retry_backoff, keepalive_enable=keepalive_enable, keepalive_delay=keepalive_delay)
+    Jedis.set_client(client, false, generate_slots())
 end
 
 """
@@ -286,6 +294,12 @@ function reconnect!(client::Client)
     prepare!(client)
     return client
 end
+function reconnect!(client::Jedis.Global_client)
+    for (_, node) in client.clients
+        reconnect!(node["client"])
+    end
+    return client
+end
 
 """
     flush!(client::Client)
@@ -349,8 +363,7 @@ function isclosed(client::Global_client)
     for (key, node) in client.clients
         push!(closed, status(node["client"]) == Base.StatusClosing || status(node["client"]) == Base.StatusClosed || status(node["client"]) == Base.StatusOpen)
     end
-    return  all(closed)
-        
+    return  all(closed) 
 end
 
 """
@@ -640,7 +653,6 @@ function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bo
 
             push!(slots, key)
         end
-
         allequal(x) = all(y -> y == x[1], x)
         if allequal(slots)
             slot = get_hash_slot(slots[1])
@@ -656,7 +668,6 @@ function get_client(client::Jedis.Global_client, keys::Vector{String}, write::Bo
         end
         
     end
-
     client_connection = client.clients[node]["client"]
     return client_connection
 end

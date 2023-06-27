@@ -8,7 +8,7 @@ export Client, Pipeline, RedisError, get_global_client, set_global_client, get_s
        hdel, rpush, lpush, lpos, lrem, lpop, rpop, blpop, brpop, llen, lrange, publish, spublish, 
        subscribe, unsubscribe, psubscribe, punsubscribe, ssubscribe, sunsubscribe, incr, incrby, 
        incrbyfloat, hincrby, hincrbyfloat, zincrby, zadd, zrange, zrangebyscore, zrem, acquire_lock, 
-       release_lock, redis_lock, isredislocked, isclosed
+       release_lock, redis_lock, isredislocked, isclosed, set_client_instance, set_client
 
 using Sockets
 using MbedTLS
