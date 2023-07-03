@@ -76,7 +76,8 @@ julia> subscriber.subscriptions
 Set{String}()
 ```
 """
-function subscribe(fn::Function, channel, channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client::Client=Jedis.get_client(get_global_client(), ["*"], false, false))
+function subscribe(fn::Function, channel, channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client=get_global_client())
+    client=Jedis.get_client(client, ["*"], false, false)
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
     end
@@ -197,8 +198,7 @@ end
 
 Unsubscribes the client from the given shard channels.
 """
-function sunsubscribe(shard_channels...; client=get_global_client())
-    client=Jedis.get_client(client, [shard_channels...], false, false)
+function sunsubscribe(shard_channels...; client=Jedis.get_client(get_global_client(), [shard_channels...], false, false))
     if typeof(client) == Client
         execute_without_recv(["SUNSUBSCRIBE", shard_channels...], client)
     end
