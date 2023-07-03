@@ -19,15 +19,12 @@ function execute(command::AbstractArray, client::Client)
 
     @lock client.lock begin
         flush!(client)
-        retry!(client)
+        # retry!(client)
         write(client.socket, resp(command))
-        msg = recv(client.socket)
-        print(msg)
-        
+        msg = recv(client.socket)     
         if msg isa Exception
             throw(msg)
         end
-
         return msg
     end
 end

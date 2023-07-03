@@ -189,14 +189,8 @@ function update_client(client=Client, cluster=false, slots=Dict{Int, Vector{Stri
         node_connections = configure_client_single(client)
         cluster = false
     end
-    update_slots(slots, node_connections)
 
-    if  isdefined(GLOBAL_CLIENT, :x)
-        nodes = GLOBAL_CLIENT[].clients
-        nodes["node1"] = client
-    else
-        nodes = Dict("node2"=> client)
-    end
+    update_slots(slots, node_connections)
 
     global_client = Global_client(
         node_connections,
@@ -212,12 +206,10 @@ end
 Sets a Client object as the `GLOBAL_CLIENT[]` instance.
 """
 function set_global_client(client::Client, cluster::Bool, slots::Dict{Int, Vector{String}})
-    # GLOBAL_CLIENT[] = client
     GLOBAL_CLIENT[] = update_client(client, cluster, slots)
 end
 function set_client(client::Client, cluster::Bool, slots::Dict{Int, Vector{String}})
-    # GLOBAL_CLIENT[] = client
-    update_client(client, cluster, slots)
+    return update_client(client, cluster, slots)
 end
 
 function set_global_client(; host="127.0.0.1", port=6379, database=0, password="", username="", ssl_config=nothing, retry_when_closed=true, retry_max_attemps=1, retry_backoff=(x) -> 2^x, keepalive_enable=false, keepalive_delay=60)
@@ -288,7 +280,7 @@ end
 Reconnects the input client socket connection.
 """
 function reconnect!(client::Client)
-    disconnect!(client)
+    # disconnect!(client)
     @info "Attempting to reconnect to $client"
     client.socket = isnothing(client.ssl_config) ? connect(client.host, client.port) : ssl_connect(connect(client.host, client.port), client.host, client.ssl_config)
     prepare!(client)
@@ -314,21 +306,11 @@ function flush!(client::Client)
     end
 end
 function flush!(client::Jedis.Global_client)
-    if typeof(client) == Client
-        nb = bytesavailable(client.socket)
+    for (_, c) in client.clients
+        nb = bytesavailable(c["client"].socket)
         if nb > 0
             buffer = Vector{UInt8}(undef, nb)
-            readbytes!(client.socket, buffer, nb)
-        end
-    end
-
-    if typeof(client) == GLOBAL_CLIENT
-        for (_, c) in client.clients
-            nb = bytesavailable(c["client"].socket)
-            if nb > 0
-                buffer = Vector{UInt8}(undef, nb)
-                readbytes!(c["client"].socket, buffer, nb)
-            end
+            readbytes!(c["client"].socket, buffer, nb)
         end
     end
 end
@@ -382,6 +364,7 @@ function retry!(client::Client)
     end
 
     @warn "Client socket is closed or unusable, retrying connection to $(endpoint(client))"
+    @info client.retry_max_attemps
     attempts = 0
 
     while attempts < client.retry_max_attemps
@@ -676,12 +659,14 @@ function get_client(client::Client, keys::Vector{String}, write::Bool=false, rep
     return client
 end
 
-function get_any_primary_node(client)
-    (key, node) = rand(client.clients)
-    while node["node_type"] != "primary"
-        (key, node) = rand(client.clients)
+function get_any_primary_node(client::Jedis.Global_client)
+    nodes = []
+    for (key, _) in client.clients
+        if client.clients[key]["node_type"] == "primary"
+            push!(nodes, key)
+        end
     end
-    return key
+    return rand(nodes)
 end
 
 function get_primary_nodes(client)

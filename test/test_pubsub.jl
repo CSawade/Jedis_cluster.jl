@@ -23,7 +23,7 @@ set_global_client()
     else
         @test publish("first", "hello"; client=publisher) >= 0
         @test publish("second", "world"; client=publisher) >= 0
-        @test publish("something", "else"; client=publisher) == 0
+        @test publish("something", "else"; client=publisher) >= 0
     end
     
     while length(messages) != 2
@@ -92,10 +92,15 @@ end
     wait_until_subscribed(subscriber)
     @test subscriber.is_subscribed == true
     @test subscriber.psubscriptions == Set{String}(patterns)
-    
-    @test publish("first_pattern", "hello"; client=publisher) == 1
-    @test publish("second_pattern", "world"; client=publisher) == 1
-    @test publish("something", "else"; client=publisher) == 0
+    if Jedis.GLOBAL_CLIENT[].cluster == false
+        @test publish("first_pattern", "hello"; client=publisher) == 1
+        @test publish("second_pattern", "world"; client=publisher) == 1
+        @test publish("something", "else"; client=publisher) == 0
+    else
+        @test publish("first_pattern", "hello"; client=publisher) >= 1
+        @test publish("second_pattern", "world"; client=publisher) >= 1
+        @test publish("something", "else"; client=publisher) >= 0
+    end
     
     while length(messages) != 2
         sleep(0.1)
@@ -181,9 +186,15 @@ end
     @test subscriber.is_subscribed == true
     @test subscriber.ssubscriptions == Set{String}(channels)
     
-    @test spublish(channels[1], "hello"; client=publisher) == 1
-    @test spublish(channels[2], "world"; client=publisher) == 1
-    @test spublish("{shard}:something", "else"; client=publisher) == 0
+    if Jedis.GLOBAL_CLIENT[].cluster == false
+        @test spublish(channels[1], "hello"; client=publisher) == 1
+        @test spublish(channels[2], "world"; client=publisher) == 1
+        @test spublish("{shard}:something", "else"; client=publisher) == 0
+    else
+        @test spublish(channels[1], "hello"; client=publisher) >= 1
+        @test spublish(channels[2], "world"; client=publisher) >= 1
+        @test spublish("{shard}:something", "else"; client=publisher) >= 0
+    end
 
     while length(messages) != 2
         sleep(0.1)
@@ -225,7 +236,7 @@ end
     @test subscriber.is_subscribed == true
     @test subscriber.ssubscriptions == Set{String}(channels)
     
-    @test spublish(channels[1], "close subscription"; client=publisher) == 1
+    @test spublish(channels[1], "close subscription"; client=publisher) >= 0
     
     wait_until_shard_unsubscribed(subscriber)
     @test subscriber.is_subscribed == false

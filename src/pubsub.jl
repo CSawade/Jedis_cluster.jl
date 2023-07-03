@@ -148,7 +148,7 @@ Subscribes the client to the given shard channels in a do block. Optionally prov
 """
 function ssubscribe(fn::Function, shard_channel, shard_channels...; stop_fn::Function=(msg) -> false, err_cb::Function=(err) -> rethrow(err), client=get_global_client())
     client=Jedis.get_client(client, [shard_channel, shard_channels...], false, false)
-    
+
     if client.is_subscribed
         throw(RedisError("SUBERROR", "Cannot open multiple subscriptions in the same Client instance"))
     end

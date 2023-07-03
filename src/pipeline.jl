@@ -113,10 +113,10 @@ function Base.pipeline(fn::Function, batch_size::Int; client::Global_client=get_
 end
 
 
-function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=false, replica::Bool=false)
+function get_client(pipe::Jedis.Pipeline, keys::Vector{String}, write::Bool=false, replica::Bool=false)
     if keys[1] == "*"
         # @info "Subscribe or publish to any node"
-        node = rand(GLOBAL_CLIENT[].clients)[1]
+        node = rand(pipe.client.clients)[1]
     else
         slots = []
         for key::String in keys
@@ -132,10 +132,10 @@ function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=fa
             slot = get_hash_slot(slots[1])
             if ~write && replica
                 @info "Redirecting to replica"
-                node = rand(GLOBAL_CLIENT[].slots[slot][2:end])
-                execute(["READONLY"], GLOBAL_CLIENT[].clients[node]["client"])
+                node = rand(pipe.client.slots[slot][2:end])
+                execute(["READONLY"],pipe.client.clients[node]["client"])
             else
-                node = GLOBAL_CLIENT[].slots[slot][1]
+                node = pipe.client.slots[slot][1]
             end
         else 
             throw(RedisError("CROSSSLOT", "Keys in request don't hash to the same slot"))
@@ -143,12 +143,12 @@ function get_client(client::Jedis.Pipeline, keys::Vector{String}, write::Bool=fa
         
     end
 
-    push!(client.client_exec, node)
+    push!(pipe.client_exec, node)
 
-    if isempty(client.order)
-        push!(client.order, 1)
+    if isempty(pipe.order)
+        push!(pipe.order, 1)
     else 
-        push!(client.order, client.order[end] + 1)
+        push!(pipe.order, pipe.order[end] + 1)
     end
-    return client
+    return pipe
 end
